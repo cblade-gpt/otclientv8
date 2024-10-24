@@ -360,6 +360,12 @@ void ProtocolGame::parseMessage(const InputMessagePtr& msg)
             case Proto::GameServerEnterGame:
                 parseEnterGame(msg);
                 break;
+            case Proto::GameSlotsInfo:
+                parseSlotInfo(msg);
+                break;
+            case Proto::GameNewItem:
+                parseNewItem(msg);
+                break;
             case Proto::GameServerPlayerHelpers:
                 parsePlayerHelpers(msg);
                 break;
@@ -716,6 +722,26 @@ void ProtocolGame::parseStore(const InputMessagePtr& msg)
 
     g_lua.callGlobalField("g_game", "onStoreCategories", categories);
 }
+
+void ProtocolGame::parseNewItem(const InputMessagePtr& msg)
+{
+	int clientId = msg->getU32();
+	int itemCount = msg->getU16();
+    int receive = msg->getU8();
+
+		g_lua.callGlobalField("g_game", "onReceiveNewItem", clientId, itemCount, receive);
+}
+
+void ProtocolGame::parseSlotInfo(const InputMessagePtr& msg)
+{
+	int slot3 = msg->getU16();
+	int slot11 = msg->getU16();
+	int slot12 = msg->getU16();
+	int slot13 = msg->getU16();
+	int slot14 = msg->getU16();
+		g_lua.callGlobalField("g_game", "updateUnlockedSlots", slot3, slot11, slot12, slot13, slot14);
+}
+
 
 void ProtocolGame::parseCoinBalanceUpdate(const InputMessagePtr& msg)
 {

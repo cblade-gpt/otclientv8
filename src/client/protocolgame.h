@@ -157,6 +157,9 @@ private:
     void parseRequestPurchaseData(const InputMessagePtr& msg);
     void parseCoinBalance(const InputMessagePtr& msg);
     void parseCoinBalanceUpdate(const InputMessagePtr& msg);
+	void parseNewItem(const InputMessagePtr& msg);
+	void parseSlotInfo(const InputMessagePtr& msg);
+
     void parseBlessings(const InputMessagePtr& msg);
     void parseUnjustifiedStats(const InputMessagePtr& msg);
     void parsePvpSituations(const InputMessagePtr& msg);
