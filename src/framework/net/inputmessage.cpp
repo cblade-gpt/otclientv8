@@ -23,7 +23,9 @@
 #include "inputmessage.h"
 #include <framework/util/crypt.h>
 #include <client/map.h>
+#include <framework/core/logger.h>
 
+static bool debugGetters = true; // changing this to true for full info about each message and headerbyte
 InputMessage::InputMessage()
 {
     reset();
@@ -50,6 +52,10 @@ uint8 InputMessage::getU8()
 {
     checkRead(1);
     uint8 v = m_buffer[m_readPos];
+    if (debugGetters) {
+        g_logger.debug(stdext::format("InputMessage::getByte at position %d = %d (0x%02x)", 
+            m_readPos, static_cast<int>(v), v));
+    }
     m_readPos += 1;
     return v;
 }
@@ -58,6 +64,10 @@ uint16 InputMessage::getU16()
 {
     checkRead(2);
     uint16 v = stdext::readULE16(m_buffer + m_readPos);
+    if (debugGetters) {
+        g_logger.debug(stdext::format("InputMessage::getU16 at position %d = %d", 
+            m_readPos, v));
+    }
     m_readPos += 2;
     return v;
 }
@@ -66,6 +76,10 @@ uint32 InputMessage::getU32()
 {
     checkRead(4);
     uint32 v = stdext::readULE32(m_buffer + m_readPos);
+    if (debugGetters) {
+        g_logger.debug(stdext::format("InputMessage::getU32 at position %d = %d", 
+            m_readPos, v));
+    }
     m_readPos += 4;
     return v;
 }
@@ -74,6 +88,10 @@ uint64 InputMessage::getU64()
 {
     checkRead(8);
     uint64 v = stdext::readULE64(m_buffer + m_readPos);
+    if (debugGetters) {
+        g_logger.debug(stdext::format("InputMessage::getU64 at position %d = %d", 
+            m_readPos, v));
+    }
     m_readPos += 8;
     return v;
 }
@@ -83,6 +101,11 @@ std::string InputMessage::getString()
     uint16 stringLength = getU16();
     checkRead(stringLength);
     char* v = (char*)(m_buffer + m_readPos);
+    std::string str(v, stringLength);
+    if (debugGetters) {
+        g_logger.debug(stdext::format("InputMessage::getString at position %d = %s", 
+            m_readPos, str));
+    }
     m_readPos += stringLength;
     return std::string(v, stringLength);
 }
@@ -91,6 +114,11 @@ double InputMessage::getDouble()
 {
     uint8 precision = getU8();
     int32 v = getU32() - INT_MAX;
+    double result = (v / std::pow((float)10, precision));
+    if (debugGetters) {
+        g_logger.debug(stdext::format("InputMessage::getDouble at position %d = %f", 
+            m_readPos, result));
+    }
     return (v / std::pow((float)10, precision));
 }
 
