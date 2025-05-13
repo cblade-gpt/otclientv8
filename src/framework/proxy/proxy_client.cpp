@@ -60,12 +60,12 @@ void Proxy::check(const boost::system::error_code& ec)
     if (m_state == STATE_NOT_CONNECTED) {
         connect();
     } else if (m_state == STATE_CONNECTING) { // timeout for async_connect
-        if (lastPing + 50 > CHECK_INTERVAL * 5) {
+        if (lastPing + 50 > CHECK_INTERVAL * 2) {
             disconnect();
         }
     } else if (m_state == STATE_CONNECTED || m_state == STATE_CONNECTING_WAIT_FOR_PING) {
         if (m_waitingForPing) {
-            if (lastPing + 50 > CHECK_INTERVAL* (m_state == STATE_CONNECTING_WAIT_FOR_PING ? 5 : 3)) {
+            if (lastPing + 50 > CHECK_INTERVAL* (m_state == STATE_CONNECTING_WAIT_FOR_PING ? 2 : 1)) {
 #ifdef PROXY_DEBUG
                 std::clog << "[Proxy " << m_host << "] ping timeout" << std::endl;
 #endif
