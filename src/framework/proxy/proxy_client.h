@@ -25,7 +25,7 @@ class Session;
 using SessionPtr = std::shared_ptr<Session>;
 
 class Proxy : public std::enable_shared_from_this<Proxy> {
-    static constexpr int CHECK_INTERVAL = 2500; // also timeout for ping
+    static constexpr int CHECK_INTERVAL = 500; // also timeout for ping
     static constexpr int BUFFER_SIZE = 65535;
     enum ProxyState {
         STATE_NOT_CONNECTED,
