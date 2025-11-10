@@ -222,9 +222,8 @@ local function addOffer(offer, offerType)
       })
     end
     row.ref = id
-
     if offer.warn then
-      row:setTooltip(tr('This offer is 25%% below the average market price'))
+      --row:setTooltip(tr('This offer is 25%% below the average market price'))
       buyOfferTable:setColumnStyle('OfferTableColumn', true)
     end
   else
@@ -251,7 +250,11 @@ local function addOffer(offer, offerType)
       })
     end
     row.ref = id
-
+	if offer:getDescription() then
+		if offer:getDescription() ~= "" then
+			row:setTooltip(offer:getDescription())
+		end
+	end
     if offer.warn then
       row:setTooltip(tr('This offer is 25%% above the average market price'))
       sellOfferTable:setColumnStyle('OfferTableColumn', true)
@@ -504,7 +507,6 @@ local function updateBalance(balance)
 
   if balance < 0 then balance = 0 end
   information.balance = balance
-
   balanceLabel:setText('Balance: '.. comma_value(balance) ..' gold')
   balanceLabel:resizeToText()
 end
@@ -1100,6 +1102,21 @@ function Market.getDepotCount(itemId)
   return information.depotItems[itemId] or 0
 end
 
+
+function Market.getDepotItemDescription(itemId)
+	if not information.depotDescs then
+		return ""
+	end
+	return information.depotDescs[itemId] or ""
+end
+
+function Market.getDepotItemPosition(itemId)
+	if not information.depotItems then
+		return 0
+	end
+	return information.depotPositions[itemId] or 0
+end
+
 function Market.enableCreateOffer(enable)
   offerTypeList:setEnabled(enable)
   totalPriceEdit:setEnabled(enable)
@@ -1194,8 +1211,12 @@ function Market.refreshItemsWidget(selectItem)
     local amount = Market.getDepotCount(item.marketData.tradeAs)
     if amount > 0 then
       itemWidget:setText(comma_value(amount))
-      itemBox:setTooltip('You have '.. amount ..' in your depot.')
-    end
+	  itemBox:setTooltip(Market.getDepotItemDescription(item.marketData.tradeAs))
+	  --if Market.getDepotItemDescription(item.marketData.tradeAs) == "" then
+		--itemBox:setTooltip(
+      --itemBox:setTooltip('You have '.. amount ..' in your depot.') -- apply new tooltip after position retrival information.depotPositions[itemId] == itemPos
+      --protocolGame:sendExtendedOpcode(CODE_TOOLTIPS, json.encode({depotPositions[itemId].x, depotPositions[itemId].y, depotPositions[itemId].z, 0}))
+	end
 
     radioItemSet:addWidget(itemBox)
   end
@@ -1335,8 +1356,8 @@ function Market.createNewOffer()
     Market.displayMessage(errorMsg)
     return
   end
-
-  MarketProtocol.sendMarketCreateOffer(type, spriteId, amount, piecePrice, anonymous)
+  local depotItemPosition = Market.getDepotItemPosition(spriteId)
+  MarketProtocol.sendMarketCreateOffer(type, spriteId, depotItemPosition, amount, piecePrice, anonymous)
   lastCreatedOffer = os.time()
   Market.resetCreateOffer()
 end
@@ -1356,7 +1377,7 @@ end
 
 -- protocol callback functions
 
-function Market.onMarketEnter(depotItems, offers, balance, vocation, items)
+function Market.onMarketEnter(depotItems, depotPositions, depotDescs, offers, balance, vocation, items)
   if not loaded or (items and #items > 0) then
     initMarketItems(items)
     loaded = true
@@ -1381,7 +1402,8 @@ function Market.onMarketEnter(depotItems, offers, balance, vocation, items)
 
   -- set list of depot items
   information.depotItems = depotItems
-
+  information.depotPositions = depotPositions
+  information.depotDescs = depotDescs
   for i = 1, #marketItems[MarketCategory.TibiaCoins] do
     local item = marketItems[MarketCategory.TibiaCoins][i].displayItem
     depotItems[item:getId()] = tibiaCoins

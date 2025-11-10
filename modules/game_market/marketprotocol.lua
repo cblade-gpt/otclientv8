@@ -15,7 +15,6 @@ end
 local function readMarketOffer(msg, action, var)
   local timestamp = msg:getU32()
   local counter = msg:getU16()
-
   local itemId = 0
   if var == MarketRequest.MyOffers or var == MarketRequest.MyHistory then
     itemId = msg:getU16()
@@ -24,17 +23,19 @@ local function readMarketOffer(msg, action, var)
   end
 
   local amount = msg:getU16()
-  local price = msg:getU32()
+  local price = msg:getU64()
   local playerName
+  local description
   local state = MarketOfferState.Active
   if var == MarketRequest.MyHistory then
     state = msg:getU8()
   elseif var == MarketRequest.MyOffers then
-  else
+	description = msg:getString() 
+ else
     playerName = msg:getString()
+	description = msg:getString()
   end
-
-  return MarketOffer.new({timestamp, counter}, action, Item.create(itemId), amount, price, playerName, state, var)
+  return MarketOffer.new({timestamp, counter}, action, Item.create(itemId), amount, price, playerName, state, var, description)
 end
 
 -- parsing protocols
@@ -55,31 +56,24 @@ local function parseMarketEnter(protocol, msg)
     end    
   end
   
-  local balance = 0
-  if g_game.getProtocolVersion() <= 1250 or not g_game.getFeature(GameTibia12Protocol) then
-    if g_game.getProtocolVersion() >= 981 or g_game.getProtocolVersion() < 944 then
-      balance = msg:getU64()
-    else
-      balance = msg:getU32()
-    end
-  end
-  
-  local vocation = -1
-  if g_game.getProtocolVersion() >= 944 and g_game.getProtocolVersion() < 950 then
-    vocation = msg:getU8() -- get vocation id
-  end
+  local balance = msg:getU64()
   local offers = msg:getU8()
-
+  local vocation = -1
   local depotItems = {}
+  local depotPositions = {}
+  local depotDescs = {}
   local depotCount = msg:getU16()
   for i = 1, depotCount do
     local itemId = msg:getU16() -- item id
     local itemCount = msg:getU16() -- item count
-
+	local itPos = msg:getU32()
+	local itDesc = msg:getString()
     depotItems[itemId] = itemCount
+	depotPositions[itemId] = itPos
+	depotDescs[itemId] = itDesc
   end
-
-  signalcall(Market.onMarketEnter, depotItems, offers, balance, vocation, items)
+  
+  signalcall(Market.onMarketEnter, depotItems, depotPositions, depotDescs, offers, balance, vocation, items)
   return true
 end
 
@@ -90,7 +84,6 @@ end
 
 local function parseMarketDetail(protocol, msg)
   local itemId = msg:getU16()
-
   local descriptions = {}
   for i = MarketItemDescription.First, MarketItemDescription.Last do
     if msg:peekU16() ~= 0x00 then
@@ -114,9 +107,9 @@ local function parseMarketDetail(protocol, msg)
   local count = msg:getU8()
   for i=1, count do
     local transactions = msg:getU32() -- transaction count
-    local totalPrice = msg:getU32() -- total price
-    local highestPrice = msg:getU32() -- highest price
-    local lowestPrice = msg:getU32() -- lowest price
+    local totalPrice = msg:getU64() -- total price
+    local highestPrice = msg:getU64() -- highest price
+    local lowestPrice = msg:getU64() -- lowest price
 
     local tmp = time - statistics.SECONDS_PER_DAY
     table.insert(purchaseStats, OfferStatistic.new(tmp, MarketAction.Buy, transactions, totalPrice, highestPrice, lowestPrice))
@@ -126,9 +119,9 @@ local function parseMarketDetail(protocol, msg)
   count = msg:getU8()
   for i=1, count do
     local transactions = msg:getU32() -- transaction count
-    local totalPrice = msg:getU32() -- total price
-    local highestPrice = msg:getU32() -- highest price
-    local lowestPrice = msg:getU32() -- lowest price
+    local totalPrice = msg:getU64() -- total price
+    local highestPrice = msg:getU64() -- highest price
+    local lowestPrice = msg:getU64() -- lowest price
 
     local tmp = time - statistics.SECONDS_PER_DAY
     table.insert(saleStats, OfferStatistic.new(tmp, MarketAction.Sell, transactions, totalPrice, highestPrice, lowestPrice))
@@ -237,14 +230,15 @@ function MarketProtocol.sendMarketBrowseMyHistory()
   MarketProtocol.sendMarketBrowse(MarketRequest.MyHistory)
 end
 
-function MarketProtocol.sendMarketCreateOffer(type, spriteId, amount, price, anonymous)
+function MarketProtocol.sendMarketCreateOffer(type, spriteId, position, amount, price, anonymous)
   if g_game.getFeature(GamePlayerMarket) then
     local msg = OutputMessage.create()
     msg:addU8(ClientOpcodes.ClientMarketCreate)
     msg:addU8(type)
     msg:addU16(spriteId)
+	msg:addU32(position)
     msg:addU16(amount)
-    msg:addU32(price)
+    msg:addU64(price)
     msg:addU8(anonymous)
     send(msg)
   else

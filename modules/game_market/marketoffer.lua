@@ -4,13 +4,14 @@ MarketOffer.__index = MarketOffer
 local OFFER_TIMESTAMP = 1
 local OFFER_COUNTER = 2
 
-MarketOffer.new = function(offerId, t, item, amount, price, playerName, state, var)
+MarketOffer.new = function(offerId, t, item, amount, price, playerName, state, var, description)
   local offer = {
     id = {},
     type = nil,
     item = 0,
     amount = 0,
     price = 0,
+	description = "",
     player = '',
     state = 0,
     var = nil
@@ -35,7 +36,7 @@ MarketOffer.new = function(offerId, t, item, amount, price, playerName, state, v
   offer.amount = amount
   offer.price = price
   offer.player = playerName
-
+  offer.description = description
   state = tonumber(state)
   if state ~= MarketOfferState.Active and state ~= MarketOfferState.Cancelled
     and state ~= MarketOfferState.Expired and state ~= MarketOfferState.Accepted then
@@ -115,6 +116,10 @@ end
 
 function MarketOffer:getPrice()
   return self.price
+end
+
+function MarketOffer:getDescription()
+  return self.description
 end
 
 function MarketOffer:getTotalPrice()
