@@ -36,7 +36,10 @@
 #include <framework/platform/platform.h>
 #include <framework/util/stats.h>
 #include <framework/voice/luafunctions_voice.h>
+#include <framework/net/connection.h>
 #include <regex>
+
+SocksProxyConfig g_socksProxy;
 
 #ifdef FW_SOUND
 #include <framework/sound/soundmanager.h>
@@ -923,6 +926,15 @@ void Application::registerLuaFunctions()
     g_lua.bindSingletonFunction("g_proxy", "getProxies", &ProxyManager::getProxies, &g_proxy);
     g_lua.bindSingletonFunction("g_proxy", "getProxiesDebugInfo", &ProxyManager::getProxiesDebugInfo, &g_proxy);
     g_lua.bindSingletonFunction("g_proxy", "getPing", &ProxyManager::getPing, &g_proxy);
+    g_lua.bindGlobalFunction("setSocksProxy", [](const std::string& host, int port) {
+        g_socksProxy.host = host;
+        g_socksProxy.port = static_cast<uint16_t>(port);
+    });
+    g_lua.bindGlobalFunction("setHttpProxy", [](const std::string& host, int port) {
+        g_httpProxy.host = host;
+        g_httpProxy.port = static_cast<uint16_t>(port);
+    });
+
 
     g_lua.registerSingletonClass("g_http");
     g_lua.bindSingletonFunction("g_http", "get", &Http::get, &g_http);

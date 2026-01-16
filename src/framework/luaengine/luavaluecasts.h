@@ -26,6 +26,7 @@
 // this file is and must be included only from luainterface.h
 
 #include "declarations.h"
+#include <framework/luaengine/luaobject.h> // ensure derived types convert to LuaObjectPtr
 #include <framework/otml/declarations.h>
 
 template<typename T>
@@ -107,6 +108,12 @@ typename std::enable_if<std::is_enum<T>::value, bool>::type
 luavalue_cast(int index, T& myenum);
 
 // LuaObject pointers
+// Specific overload for std::shared_ptr<T> where T inherits from LuaObject
+template<class T>
+typename std::enable_if<std::is_base_of<LuaObject, T>::value, int>::type
+push_luavalue(const std::shared_ptr<T>& obj);
+
+// Generic template for other smart pointer types with element_type
 template<class T>
 typename std::enable_if<std::is_base_of<LuaObject, typename T::element_type>::value, int>::type
 push_luavalue(const T& obj);
@@ -196,6 +203,19 @@ luavalue_cast(int index, T& myenum) {
     return false;
 }
 
+// Specific implementation for std::shared_ptr<T>
+template<class T>
+typename std::enable_if<std::is_base_of<LuaObject, T>::value, int>::type
+push_luavalue(const std::shared_ptr<T>& obj) {
+    if(obj) {
+        // Use asLuaObject() which returns the correct LuaObjectPtr type via shared_from_this()
+        g_lua.pushObject(obj->asLuaObject());
+    } else
+        g_lua.pushNil();
+    return 1;
+}
+
+// Generic template for other smart pointer types with element_type
 template<class T>
 typename std::enable_if<std::is_base_of<LuaObject, typename T::element_type>::value, int>::type
 push_luavalue(const T& obj) {

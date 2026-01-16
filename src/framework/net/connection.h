@@ -27,6 +27,26 @@
 #include <framework/luaengine/luaobject.h>
 #include <framework/core/timer.h>
 #include <framework/core/declarations.h>
+#include <string>
+
+struct SocksProxyConfig {
+    std::string host;
+    uint16_t port = 0;
+    std::string user;
+    std::string pass;
+    uint8_t version = 5; // 4 or 5
+};
+
+extern SocksProxyConfig g_socksProxy;
+
+struct HttpProxyConfig {
+    std::string host;
+    uint16_t port = 0;
+    std::string user;
+    std::string pass;
+};
+
+extern HttpProxyConfig g_httpProxy;
 
 class Connection : public LuaObject
 {

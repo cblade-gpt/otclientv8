@@ -25,12 +25,17 @@
 #include <framework/core/application.h>
 #include <framework/core/eventdispatcher.h>
 #include <boost/asio.hpp>
+#include <array>
+#include <sstream>
+#include <framework/util/crypt.h>
 #include <framework/util/stats.h>
 #include <framework/util/extras.h>
 #include <chrono>
 
 asio::io_service g_ioService;
 std::list<std::shared_ptr<asio::streambuf>> Connection::m_outputStreams;
+SocksProxyConfig g_socksProxy;
+HttpProxyConfig g_httpProxy;
 
 Connection::Connection() :
         m_readTimer(g_ioService),
@@ -96,6 +101,207 @@ void Connection::connect(const std::string& host, uint16 port, const std::functi
     m_connecting = true;
     m_error.clear();
     m_connectCallback = connectCallback;
+
+    // If a SOCKS proxy is configured, connect synchronously through it (supports SOCKS4 and SOCKS5 with optional auth)
+    if(!g_socksProxy.host.empty() && g_socksProxy.port > 0) {
+        try {
+            // resolve proxy
+            asio::ip::tcp::resolver::query proxyQuery(g_socksProxy.host, stdext::unsafe_cast<std::string>(g_socksProxy.port));
+            auto proxyEndpoint = m_resolver.resolve(proxyQuery);
+            boost::asio::connect(m_socket, proxyEndpoint);
+
+            if(g_socksProxy.version == 4) {
+                // SOCKS4
+                asio::ip::tcp::resolver::query dstQuery(host, stdext::unsafe_cast<std::string>(port));
+                auto dstIt = m_resolver.resolve(dstQuery);
+                auto dstEndpoint = *dstIt;
+                if(!dstEndpoint.endpoint().address().is_v4()) {
+                    throw std::runtime_error("SOCKS4: only IPv4 addresses supported");
+                }
+                auto addrBytes = dstEndpoint.endpoint().address().to_v4().to_bytes();
+                std::vector<uint8_t> req;
+                req.push_back(0x04); // VN
+                req.push_back(0x01); // CONNECT
+                req.push_back((uint8_t)((port >> 8) & 0xFF));
+                req.push_back((uint8_t)(port & 0xFF));
+                req.insert(req.end(), addrBytes.begin(), addrBytes.end());
+                if(!g_socksProxy.user.empty()) {
+                    req.insert(req.end(), g_socksProxy.user.begin(), g_socksProxy.user.end());
+                }
+                req.push_back(0x00); // end of userid
+                boost::asio::write(m_socket, boost::asio::buffer(req));
+
+                std::array<uint8_t,8> resp;
+                boost::asio::read(m_socket, boost::asio::buffer(resp));
+                if(resp[1] != 0x5A) {
+                    throw std::runtime_error("SOCKS4 connect failed");
+                }
+            } else {
+                // SOCKS5 greeting: allow no-auth and username/password
+                std::vector<uint8_t> greeting;
+                greeting.push_back(0x05);
+                if(g_socksProxy.user.empty()) {
+                    greeting.push_back(0x01);
+                    greeting.push_back(0x00); // no auth
+                } else {
+                    greeting.push_back(0x02);
+                    greeting.push_back(0x00); // no auth
+                    greeting.push_back(0x02); // username/password
+                }
+                boost::asio::write(m_socket, boost::asio::buffer(greeting));
+
+                std::array<uint8_t,2> greetResp;
+                boost::asio::read(m_socket, boost::asio::buffer(greetResp));
+                if(greetResp[0] != 0x05) {
+                    throw std::runtime_error("SOCKS5 handshake failed");
+                }
+                if(greetResp[1] == 0x02) {
+                    // username/password auth
+                    std::vector<uint8_t> auth;
+                    auth.push_back(0x01);
+                    auth.push_back((uint8_t)g_socksProxy.user.size());
+                    auth.insert(auth.end(), g_socksProxy.user.begin(), g_socksProxy.user.end());
+                    auth.push_back((uint8_t)g_socksProxy.pass.size());
+                    auth.insert(auth.end(), g_socksProxy.pass.begin(), g_socksProxy.pass.end());
+                    boost::asio::write(m_socket, boost::asio::buffer(auth));
+                    std::array<uint8_t,2> authResp;
+                    boost::asio::read(m_socket, boost::asio::buffer(authResp));
+                    if(authResp[1] != 0x00) {
+                        throw std::runtime_error("SOCKS5 auth failed");
+                    }
+                } else if(greetResp[1] != 0x00) {
+                    throw std::runtime_error("SOCKS5 no acceptable auth");
+                }
+
+                // Resolve destination
+                asio::ip::tcp::resolver::query dstQuery(host, stdext::unsafe_cast<std::string>(port));
+                auto dstIt = m_resolver.resolve(dstQuery);
+                auto dstEndpoint = *dstIt;
+                if(!dstEndpoint.endpoint().address().is_v4()) {
+                    throw std::runtime_error("SOCKS5: only IPv4 addresses supported");
+                }
+                auto addrBytes = dstEndpoint.endpoint().address().to_v4().to_bytes();
+
+                // SOCKS5 CONNECT
+                std::array<uint8_t,10> connectReq;
+                connectReq[0] = 0x05;
+                connectReq[1] = 0x01; // CONNECT
+                connectReq[2] = 0x00; // RSV
+                connectReq[3] = 0x01; // IPv4
+                connectReq[4] = addrBytes[0];
+                connectReq[5] = addrBytes[1];
+                connectReq[6] = addrBytes[2];
+                connectReq[7] = addrBytes[3];
+                connectReq[8] = (uint8_t)((port >> 8) & 0xFF);
+                connectReq[9] = (uint8_t)(port & 0xFF);
+
+                boost::asio::write(m_socket, boost::asio::buffer(connectReq));
+
+                std::array<uint8_t,10> connectResp;
+                boost::asio::read(m_socket, boost::asio::buffer(connectResp));
+                if(connectResp[1] != 0x00) {
+                    throw std::runtime_error("SOCKS5 CONNECT failed");
+                }
+            }
+
+            // success - configure socket for async operations
+            m_readTimer.cancel();
+            m_writeTimer.cancel();
+            m_delayedWriteTimer.cancel();
+            
+            boost::asio::ip::tcp::no_delay option(true);
+            m_socket.set_option(option);
+            boost::system::error_code ecc;
+            m_socket.set_option(boost::asio::socket_base::send_buffer_size(524288), ecc);
+            m_socket.set_option(boost::asio::socket_base::receive_buffer_size(524288), ecc);
+            
+            // Set socket to non-blocking for async operations
+            m_socket.non_blocking(true, ecc);
+            
+            m_connected = true;
+            m_connecting = false;
+            m_activityTimer.restart();
+
+            // Schedule callback on dispatcher to maintain async flow
+            g_dispatcher.addEvent([this]() {
+                if(m_connectCallback)
+                    m_connectCallback();
+            });
+            return;
+        } catch(std::exception& e) {
+            m_error = boost::system::errc::make_error_code(boost::system::errc::connection_refused);
+            g_logger.error(stdext::format("SOCKS connect failed (%s:%d v%d): %s", g_socksProxy.host, g_socksProxy.port, g_socksProxy.version, e.what()));
+            if(m_errorCallback)
+                m_errorCallback(m_error);
+            m_connecting = false;
+            return;
+        }
+    }
+
+    // If an HTTP CONNECT proxy is configured, connect synchronously through it (optional Basic auth)
+    if(!g_httpProxy.host.empty() && g_httpProxy.port > 0) {
+        try {
+            asio::ip::tcp::resolver::query proxyQuery(g_httpProxy.host, stdext::unsafe_cast<std::string>(g_httpProxy.port));
+            auto proxyEndpoint = m_resolver.resolve(proxyQuery);
+            boost::asio::connect(m_socket, proxyEndpoint);
+
+            std::ostringstream req;
+            req << "CONNECT " << host << ":" << port << " HTTP/1.1\r\n";
+            req << "Host: " << host << ":" << port << "\r\n";
+            req << "Proxy-Connection: Keep-Alive\r\n";
+            if(!g_httpProxy.user.empty()) {
+                std::string token = g_httpProxy.user + ":" + g_httpProxy.pass;
+                std::string b64 = g_crypt.base64Encode(token);
+                req << "Proxy-Authorization: Basic " << b64 << "\r\n";
+            }
+            req << "\r\n";
+            auto reqStr = req.str();
+            boost::asio::write(m_socket, boost::asio::buffer(reqStr));
+
+            boost::asio::streambuf respBuf;
+            boost::asio::read_until(m_socket, respBuf, "\r\n\r\n");
+            std::istream respStream(&respBuf);
+            std::string httpVersion;
+            unsigned int statusCode;
+            std::string statusMessage;
+            respStream >> httpVersion >> statusCode;
+            std::getline(respStream, statusMessage);
+            if(!respStream || httpVersion.substr(0,5) != "HTTP/" || statusCode != 200) {
+                throw std::runtime_error("HTTP CONNECT failed");
+            }
+
+            m_readTimer.cancel();
+            m_writeTimer.cancel();
+            m_delayedWriteTimer.cancel();
+            
+            boost::asio::ip::tcp::no_delay option(true);
+            m_socket.set_option(option);
+            boost::system::error_code ecc;
+            m_socket.set_option(boost::asio::socket_base::send_buffer_size(524288), ecc);
+            m_socket.set_option(boost::asio::socket_base::receive_buffer_size(524288), ecc);
+            
+            // Set socket to non-blocking for async operations
+            m_socket.non_blocking(true, ecc);
+            
+            m_connected = true;
+            m_connecting = false;
+            m_activityTimer.restart();
+
+            // Schedule callback on dispatcher to maintain async flow
+            g_dispatcher.addEvent([this]() {
+                if(m_connectCallback)
+                    m_connectCallback();
+            });
+            return;
+        } catch(std::exception& e) {
+            m_error = boost::system::errc::make_error_code(boost::system::errc::connection_refused);
+            g_logger.error(stdext::format("HTTP CONNECT failed (%s:%d): %s", g_httpProxy.host, g_httpProxy.port, e.what()));
+            if(m_errorCallback)
+                m_errorCallback(m_error);
+            m_connecting = false;
+            return;
+        }
+    }
 
     asio::ip::tcp::resolver::query query(host, stdext::unsafe_cast<std::string>(port));
     m_resolver.async_resolve(query, std::bind(&Connection::onResolve, asConnection(), std::placeholders::_1, std::placeholders::_2));
